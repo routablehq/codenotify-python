@@ -1,0 +1,126 @@
+# Codenotify
+
+Codenotify is a tool that analyzes the files changed in one or more git commits and emits the list of people who have subscribed to be notified when those files change. File subscribers are defined in [CODEPROS](#codepros) files.
+
+Codenotify can be run on the command line, or as a GitHub Action.
+
+
+### GitHub Action
+
+When run as a GitHub Action, Codenotify will post a comment that mentions people who have subscribed to files changed in that pull request.
+
+> 👔 Code pros! Mind taking a look at this PR?\
+> cc: @rynmlng
+
+If a comment already exists, it will update the existing comment.
+
+### CLI
+
+Codenotify does not have CLI support at this time.
+
+#### Setup
+
+Add `.github/workflows/codenotify.yml` to your repository with the following contents:
+
+```yaml
+name: codenotify
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+jobs:
+  codenotify:
+    runs-on: ubuntu-latest
+    name: codenotify
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: routablehq/codenotify@v0.5
+        env:
+          # secrets.GITHUB_TOKEN is available by default, but it won't allow CODEPROS to mention GitHub teams.
+          # If you want CODEPROS to be able to mention teams, then you need to create a personal access token
+          # (https://github.com/settings/tokens) with scopes: repo, read:org.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+## CODEPROS files
+
+CODEPROS files contain rules that define who gets notified when files change.
+
+Here is an example:
+
+```ignore
+# Lines that start with a # are a comment.
+
+# Empty lines are ignored.
+
+# Each non-comment/non-empty line is a file pattern followed by one or more subscribers separated by whitespace.
+# File patterns are relative to the directory of the CODEPROS file that they are defined in.
+# Absolute paths that start with a slash will not match anything.
+# Example:
+# Both @alice and @bob subscribe to file.py.
+# @wont-match is not subscribed to any changes because /file.py will never match.
+file.py     @alice @bob
+/file.py    @wont-match
+
+# Ordering of rules, and ordering of subscribers within rules, does not matter.
+# Each additional rule is additive and there is no precedence.
+# Example: Both @alice and @bob subscribe to file.py.
+file.py @alice
+file.py @bob
+
+# A rule can match files in subdirectories of the CODEPROS file's directory.
+# Example:
+subdir/file.py @alice
+# Alternatively, you can place a CODEPROS file in the subdirectory.
+
+# A rule can not match files in parent directories of the CODEPROS file.
+# Example: @wont-match won't be notified of changes to file.py.
+../file.py @wont-match
+
+# * is a wildcard that matches any part of a file name (but not directory separators).
+# It does not recursively match files in subdirectories.
+# Example:
+# @all-this-dir subscribes to all files in this directory.
+# @all-py-this-dir subscribes to all Python files in this directory.
+*       @all-this-dir
+*.py    @all-py-this-dir
+
+# ** is a wildcard that matches zero or more directories.
+# Example:
+# @all-readme subscribes to all readme.md files in this directory and all subdirectories.
+# @all-dir subscribes to all files inside of directory "dir" relative to the location of this CODEOWNERS file.
+# @all-docs subscribes to all files that are have an ancestor directory named "doc"
+# @all-py subscribes to all Python files in this directory and all subdirectories.
+# @all subscribes to all files in this directory and all subdirectories.
+**/readme.md    @all-readme
+dir/**"         @all-dir
+**/doc/**       @all-docs
+**/*.py         @all-py
+**/*            @all
+```
+
+
+## Why use Codenotify?
+
+GitHub projects can create a [CODEOWNERS](https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/about-code-owners) file (inspired by [Chromium's use of OWNERS files](https://chromium.googlesource.com/chromium/src/+/master/docs/code_reviews.md#OWNERS-files)) and GitHub will automatically add reviewers. There are a few downsides to this approach:
+
+1. There can be only one CODEOWNERS file, which causes the file to be hard to maintain for large projects.
+2. Rules have precedence, which means you have to understand the context of the whole CODEOWNERS file to understand the implications of a single rule.
+3. Some developers want to be notified of changes to particular files without creating the expectation that they will review changes. Unfortunately, both the name and GitHub's UI/UX treatment of CODEOWNERS implies a gatekeeper approach to code review. When CODEOWNERS is used for notifications, the number of reviewers automatically added to PRs increases, which creates two problems:
+
+   1. There is a diffusion of responsibility for the reviewers because it isn't clear who is responsible for actually reviewing the code.
+   2. PR authors don't know whose review they are actually waiting for.
+
+The [OWNERS](https://chromium.googlesource.com/chromium/src/+/master/docs/code_reviews.md#OWNERS-files) files in the Chromium project have the same set of tradeoffs as CODEOWNERS, with some differences.
+
+Codenotify makes a different set of tradeoffs:
+
+1. There can only be a CODEPROS file in the root directory.
+2. Rules are additive and do not have precedence.
+3. Codenotify is focused on notifications, not code review. The GitHub Action mentions subscribers in a comment instead of adding them to the "Reviewers" list of a PR.
+
+Codenotify can be used in conjunction with, or as a replacement for CODEOWNERS.
+
+Using codenotify as a replacement for CODEOWNERS gives PR authors the agency to decide who the best person to review the code is (e.g., based on who authored/edited/reviewed the code most recently/frequently) and to explicitly request those reviews.
