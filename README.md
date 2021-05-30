@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - uses: routablehq/codenotify@v0.5
+      - uses: routablehq/codenotify-python@v1.0
         env:
           # secrets.GITHUB_TOKEN is available by default, but it won't allow CODEPROS to mention GitHub teams.
           # If you want CODEPROS to be able to mention teams, then you need to create a personal access token

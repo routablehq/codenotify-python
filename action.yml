@@ -1,4 +1,4 @@
-name: 'codenotify'
+name: 'codenotify-python'
 description: 'Notify subscribed users and groups of changes.'
 runs:
   using: 'docker'

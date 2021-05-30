@@ -1,20 +1,28 @@
+# Python imports
+import os
+import unittest
+from copy import deepcopy
 from unittest.mock import MagicMock, mock_open, patch
+
+# Internal imports
 from main import (
     CODEPROS_FILE,
+    GITHUB_EVENT_PATH_ENV_VAR,
     GITHUB_GRAPHQL_URL_ENV_VAR,
     GITHUB_TOKEN_ENV_VAR,
+    GITHUB_WORKSPACE_ENV_VAR,
     GRAPHQL_ADD_PR_COMMENT,
     GRAPHQL_UPDATE_PR_COMMENT,
     PR_COMMENT_TITLE,
+    CodeProsGlob,
     GitHubGraphQLClient,
     comment_on_pr,
     get_changed_files,
     get_code_pros_globs,
     get_github_event_data,
     globulize_filepath,
+    main,
 )
-import os
-import unittest
 
 
 class TestGetChangedFiles(unittest.TestCase):
@@ -22,18 +30,17 @@ class TestGetChangedFiles(unittest.TestCase):
     @patch("subprocess.getoutput", return_value="")
     def test_no_files_returned(self, get_output):
         files = get_changed_files("/",
-            "ffc33a2baaebb4aa1e8ab035f89050b186a2ad36",
-            "d51184732797cbf1e3fc39b618e6f1688cc34a03")
+                                  "ffc33a2baaebb4aa1e8ab035f89050b186a2ad36",
+                                  "d51184732797cbf1e3fc39b618e6f1688cc34a03")
 
         get_output.assert_called()
         self.assertEqual(files, [])
 
-
     @patch("subprocess.getoutput", return_value="main.py\ntest_main.py")
     def test_multiple_files_returned(self, get_output):
         files = get_changed_files("/",
-            "ffc33a2baaebb4aa1e8ab035f89050b186a2ad36",
-            "d51184732797cbf1e3fc39b618e6f1688cc34a03")
+                                  "ffc33a2baaebb4aa1e8ab035f89050b186a2ad36",
+                                  "d51184732797cbf1e3fc39b618e6f1688cc34a03")
 
         get_output.assert_called()
         self.assertEqual(files, ["main.py", "test_main.py"])
@@ -67,7 +74,7 @@ class TestCodeProsGlobs(unittest.TestCase):
     @patch("os.path.exists", return_value=False)
     def test_codepros_file_missing(self, path_exists):
         code_pro_globs = get_code_pros_globs(CODEPROS_FILE, set())
-        self.assertIsNone(code_pro_globs)
+        self.assertEqual(code_pro_globs, [])
 
     def test_codepros_file_missing_file(self):
         with patch("builtins.open", new_callable=mock_open, read_data=" @pro\n") as m:
@@ -124,9 +131,13 @@ class TestGitHubGraphQLClient(unittest.TestCase):
             client = GitHubGraphQLClient()
             client.github_graphql_url
 
+        self.assertTrue(GITHUB_GRAPHQL_URL_ENV_VAR in str(ex.exception))
+
         with self.assertRaises(EnvironmentError) as ex:
             client = GitHubGraphQLClient()
             client.github_token
+
+        self.assertTrue(GITHUB_TOKEN_ENV_VAR in str(ex.exception))
 
     def test_invalid_json_query(self):
         os.environ[GITHUB_GRAPHQL_URL_ENV_VAR] = "invalid_response"
@@ -185,7 +196,7 @@ class TestGetGitHubEventData(unittest.TestCase):
             m.return_value.__next__ = lambda self: next(iter(self.readline, ''))
 
             with self.assertRaises(ValueError) as ex:
-                event_data = get_github_event_data("event.json")
+                _ = get_github_event_data("event.json")
 
             self.assertTrue("cannot be deserialized" in str(ex.exception))
 
@@ -195,7 +206,7 @@ class TestGetGitHubEventData(unittest.TestCase):
             m.return_value.__next__ = lambda self: next(iter(self.readline, ''))
 
             with self.assertRaises(ValueError) as ex:
-                event_data = get_github_event_data("event.json")
+                _ = get_github_event_data("event.json")
 
             self.assertTrue("missing pull request data" in str(ex.exception))
 
@@ -206,6 +217,48 @@ class TestGetGitHubEventData(unittest.TestCase):
 
             event_data = get_github_event_data("event.json")
             self.assertFalse(event_data["pull_request"]["draft"])
+
+
+class TestMain(unittest.TestCase):
+
+    GITHUB_EVENT_DATA = {
+            "pull_request": {
+                "base": {"sha": "40b282f968ce0593773dc8e10cd1897ebd390114"},
+                "draft": False,
+                "head": {"sha": "8ef970e3b8682ef36bf0bf1586999bafca42231e"},
+                "node_id": "MDExOlB1bGxSZXF1ZXN0NjU3NTE0MzY1",
+                "user": {"login": "@pro"}}}
+
+    def setUp(self):
+        os.environ[GITHUB_WORKSPACE_ENV_VAR] = "full_flow"
+        os.environ[GITHUB_EVENT_PATH_ENV_VAR] = "full_flow"
+
+    @patch("main.get_code_pros_globs")
+    def test_ignore_draft_pr(self, get_code_pros_globs):
+        event_data = deepcopy(self.GITHUB_EVENT_DATA)
+        event_data["pull_request"]["draft"] = True
+
+        with patch("main.get_github_event_data", return_value=event_data):
+            main()
+
+        get_code_pros_globs.assert_not_called()
+
+    @patch("main.get_changed_files")
+    @patch("main.get_github_event_data", return_value=GITHUB_EVENT_DATA)
+    def test_no_code_pro_globs(self, get_github_event_data_mock, get_changed_files_mock):
+        with patch("main.get_code_pros_globs", return_value=[]):
+            main()
+
+        get_changed_files_mock.assert_not_called()
+
+    @patch("main.get_changed_files", return_value=["main.py"])
+    @patch("main.get_code_pros_globs", return_value=[CodeProsGlob("*", {"@pro"})])
+    @patch("main.get_github_event_data", return_value=GITHUB_EVENT_DATA)
+    def test_full_flow(self, get_github_event_data_mock, get_code_pros_globs_mock, get_changed_files_mock):
+        with patch("main.comment_on_pr") as comment_on_pr_mock:
+            main()
+
+        comment_on_pr_mock.assert_called_with(self.GITHUB_EVENT_DATA["pull_request"]["node_id"], {"@pro"})
 
 
 if __name__ == "__main__":

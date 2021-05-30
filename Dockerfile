@@ -1,3 +1,7 @@
 FROM python:3.6.7-alpine as builder
 
-RUN python main.py
+COPY requirements.txt /requirements.txt
+RUN pip install -r /requirements.txt
+
+COPY main.py /main.py
+ENTRYPOINT ["python", "/main.py"]

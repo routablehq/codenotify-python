@@ -1,9 +1,13 @@
-from collections import namedtuple
-from fnmatch import fnmatch
+# Python imports
 import json
 import os
-import requests
 import subprocess
+from collections import namedtuple
+from fnmatch import fnmatch
+
+# Pip imports
+import requests
+
 
 BASE_PR_COMMENT = "👔 Code pros! Mind taking a look at this PR?\ncc:{}"
 PR_COMMENT_TITLE = "<!-- codenotify report -->\n"
@@ -18,7 +22,7 @@ GITHUB_WORKSPACE_ENV_VAR = "GITHUB_WORKSPACE"
 
 # GraphQL queries & mutations
 
-GRAPHQL_GET_PR_COMMENTS  = """
+GRAPHQL_GET_PR_COMMENTS = """
   query GetPullRequestComments ($nodeId: ID!) {
     node(id: $nodeId) {
      ... on PullRequest {
@@ -139,7 +143,6 @@ def globulize_filepath(filepath):
     elif filepath[-1] != "*":
         filepath += "/*"
 
-
     return filepath
 
 
@@ -148,18 +151,18 @@ def get_code_pros_globs(codepros_location, ignore_pros):
 
     # CODEPROS file must be defined at the base level of the git repository
     if not os.path.exists(codepros_location):
-        return
+        return []
 
     code_pro_globs = []
     with open(codepros_location) as codepros_file:
         for line in codepros_file:
-            if line[0] == "#": # commented out line
+            if line[0] == "#":  # commented out line
                 continue
 
             pro_pattern_line = line[:-1].split(" ")
 
             if not pro_pattern_line[0]:
-                if len(pro_pattern_line) == 1: # empty line
+                if len(pro_pattern_line) == 1:  # empty line
                     continue
 
                 raise IOError(f"CODEPROS file malformed, line missing file: \"{line}\"")
@@ -196,11 +199,13 @@ def comment_on_pr(pr_id, pros):
     comment = BASE_PR_COMMENT.format(" ".join(pros))
     comment = f"{PR_COMMENT_TITLE}\n{comment}"
 
-    if comment_id: # update existing comment
+    if comment_id:  # update existing comment
+        print(f"Updating comment pros to include {pros}")
         _ = github_graphql_client.make_request(
             GRAPHQL_UPDATE_PR_COMMENT,
             {"id": comment_id, "body": comment})
-    else: # add new comment
+    else:  # add new comment
+        print(f"Adding new comment with pros {pros}")
         _ = github_graphql_client.make_request(
             GRAPHQL_ADD_PR_COMMENT,
             {"subjectId": pr_id, "body": comment})
@@ -232,16 +237,14 @@ def main():
         print("Not sending notifications for draft pull request.")
         return
 
-    pr_author = "@" + event["pull_request"]["user"]["login"]
-    base_ref = event["pull_request"]["base"]["sha"]
-    head_ref = event["pull_request"]["head"]["sha"]
-
-    # TODO I did not port over the git fetching portion, is that needed?
+    pr_author = "@" + github_event_data["pull_request"]["user"]["login"]
+    base_ref = github_event_data["pull_request"]["base"]["sha"]
+    head_ref = github_event_data["pull_request"]["head"]["sha"]
 
     codepros_location = os.path.join(github_dir, CODEPROS_FILE)
 
     # do not notify this pr's author
-    code_pro_globs = get_code_pros_globs(codepros_location, ignore_pros=(pr_author,))
+    code_pro_globs = get_code_pros_globs(codepros_location, ignore_pros={pr_author})
     if not code_pro_globs:
         print("No CODEPROS globs found.")
         return
@@ -253,7 +256,7 @@ def main():
                 pros |= code_pro_glob.pros
 
     if pros:
-        comment_on_pr(event.pull_request.node_id, pros)
+        comment_on_pr(github_event_data["pull_request"]["node_id"], pros)
 
 
 if __name__ == "__main__":
