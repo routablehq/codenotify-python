@@ -255,6 +255,7 @@ def main():
             if fnmatch(changed_file, code_pro_glob.glob):
                 pros |= code_pro_glob.pros
 
+    print("No pros found for these files")
     if pros:
         comment_on_pr(github_event_data["pull_request"]["node_id"], pros)
 
