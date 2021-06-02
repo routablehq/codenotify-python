@@ -28,8 +28,13 @@ from main import (
 class TestGetChangedFiles(unittest.TestCase):
 
     @patch("subprocess.getoutput", return_value="")
-    def test_no_files_returned(self, get_output):
+    @patch("subprocess.run", return_value="")
+    @patch(
+        "main.github_graphql_client.make_request",
+        return_value={"data": {"node": {"commits": {"totalCount": 1}}}})
+    def test_no_files_returned(self, github_graphql, run, get_output):
         files = get_changed_files("/",
+                                  "abc123",
                                   "ffc33a2baaebb4aa1e8ab035f89050b186a2ad36",
                                   "d51184732797cbf1e3fc39b618e6f1688cc34a03")
 
@@ -37,8 +42,13 @@ class TestGetChangedFiles(unittest.TestCase):
         self.assertEqual(files, [])
 
     @patch("subprocess.getoutput", return_value="main.py\ntest_main.py")
-    def test_multiple_files_returned(self, get_output):
+    @patch("subprocess.run", return_value="")
+    @patch(
+        "main.github_graphql_client.make_request",
+        return_value={"data": {"node": {"commits": {"totalCount": 1}}}})
+    def test_multiple_files_returned(self, github_graphql, run, get_output):
         files = get_changed_files("/",
+                                  "abc123",
                                   "ffc33a2baaebb4aa1e8ab035f89050b186a2ad36",
                                   "d51184732797cbf1e3fc39b618e6f1688cc34a03")
 

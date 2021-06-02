@@ -40,6 +40,19 @@ GRAPHQL_GET_PR_COMMENTS = """
   }
 """
 
+GRAPHQL_GET_PR_COMMIT_COUNT = """
+  query CommitCount ($nodeId: ID!) {
+    node(id: $nodeId) {
+      ... on PullRequest {
+        commits {
+          totalCount
+        }
+      }
+    }
+  }
+"""
+
+
 GRAPHQL_ADD_PR_COMMENT = """
   mutation AddComment ($subjectId: ID!, $body: String!) {
     addComment(input: {
@@ -120,8 +133,14 @@ class GitHubGraphQLClient:
 github_graphql_client = GitHubGraphQLClient()
 
 
-def get_changed_files(github_dir, base_ref, head_ref):
+def get_changed_files(github_dir, pr_id, base_ref, head_ref):
     """ Get a collection of files changed in this branch. """
+
+    response = github_graphql_client.make_request(GRAPHQL_GET_PR_COMMIT_COUNT, {"nodeId": pr_id})
+    commit_count = response["data"]["node"]["commits"]["totalCount"]
+
+    # fetch all latest commits
+    _ = subprocess.run(["git", "-C", github_dir, "-c", "protocol.version=2", "fetch", "--deepen", str(commit_count)])
 
     output = subprocess.getoutput(
             f"git -C {github_dir} diff --name-only {base_ref}...{head_ref}")
@@ -131,6 +150,10 @@ def get_changed_files(github_dir, base_ref, head_ref):
 
 def globulize_filepath(filepath):
     """ Take a filepath defined and if a specific file is not specified, make it greedy in glob format. """
+
+    # remove leading slash
+    if filepath[0] == "/":
+        filepath = filepath[1:]
 
     # is targeting a file specifically, no change needed
     if "." in filepath.split("/")[-1]:
@@ -237,9 +260,10 @@ def main():
         print("Not sending notifications for draft pull request.")
         return
 
-    pr_author = "@" + github_event_data["pull_request"]["user"]["login"]
     base_ref = github_event_data["pull_request"]["base"]["sha"]
     head_ref = github_event_data["pull_request"]["head"]["sha"]
+    pr_author = "@" + github_event_data["pull_request"]["user"]["login"]
+    pr_id = github_event_data["pull_request"]["node_id"]
 
     codepros_location = os.path.join(github_dir, CODEPROS_FILE)
 
@@ -250,14 +274,16 @@ def main():
         return
 
     pros = set()
-    for changed_file in get_changed_files(github_dir, base_ref, head_ref):
+    for changed_file in get_changed_files(github_dir, pr_id, base_ref, head_ref):
         for code_pro_glob in code_pro_globs:
             if fnmatch(changed_file, code_pro_glob.glob):
+                print(f"Rule {code_pro_glob.glob} matches {changed_file}")
                 pros |= code_pro_glob.pros
 
-    print("No pros found for these files")
     if pros:
-        comment_on_pr(github_event_data["pull_request"]["node_id"], pros)
+        comment_on_pr(pr_id, pros)
+    else:
+        print("No pros found for these files")
 
 
 if __name__ == "__main__":
